@@ -58,6 +58,7 @@
       <div class="brand">INSTALUJ <span>ARCH</span></div>
       <div id="step-label" class="step-label">krok 1</div>
       <div class="top-right">
+        <button id="btn-steps" class="icon-btn" type="button" aria-pressed="true">skrýt kroky</button>
         <span id="purity" title="V expert módu každá nápověda ubere 8 bodů">čistota 100</span>
         <button id="btn-beginner" class="icon-btn" type="button" title="Přepne zobrazení příkazů">režim začátečník</button>
         <button id="btn-sound" class="icon-btn" type="button" title="Zvuk">zvuk vyp</button>
@@ -81,7 +82,7 @@
             <input id="cmd" name="cmd" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Příkaz">
           </form>
         </div>
-        <p class="keys">Enter odešle · Tab doplní · klik na příkaz vpravo ho vloží · <kbd>help</kbd> nápověda</p>
+        <p class="keys">Enter odešle · Tab doplní · ↑↓ historie · klik na příkaz vpravo ho vloží · <kbd>help</kbd> nápověda</p>
       </main>
       <aside class="col brief-col">
         <article class="card">
@@ -89,6 +90,7 @@
           <p id="brief-how" class="how"></p>
           <p id="brief-text"></p>
           <p id="brief-why" class="why"></p>
+          <pre id="brief-guide"></pre>
           <div id="brief-cmdbox" class="cmdbox">
             <h3>Co napsat</h3>
             <p class="cmd-tip">Klikni na řádek — vloží se do terminálu. Pak Enter.</p>
