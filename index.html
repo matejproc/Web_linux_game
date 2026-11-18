@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>INSTALUJ ARCH</title>
-  <meta name="description" content="Hra: nainstaluj Arch Linux podle ArchWiki a spusť window manager.">
+  <title>Linux installation simulation</title>
+  <meta name="description" content="Simulace instalace Arch Linuxu podle ArchWiki až po spuštění window manageru.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect fill='%23140f0c' width='64' height='64'/><rect x='8' y='18' width='28' height='14' fill='%23d7d1c7'/><rect x='8' y='18' width='8' height='14' fill='%23b8c0c8'/><rect x='14' y='22' width='16' height='6' fill='%231796ff'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -16,17 +16,13 @@
     <div class="scene">
       <div class="scene-copy">
         <p class="eyebrow">Arch Linux · ISO 2026.09.01</p>
-        <h1>INSTALUJ ARCH</h1>
+        <h1>Linux installation simulation</h1>
         <p id="intro-status" class="lead">Naučíš se nainstalovat Arch Linux. Do terminálu píšeš opravdové příkazy — nemusíš je znát předem.</p>
         <ul class="intro-how">
           <li>Nejdřív ve firmwaru <b>vypni Secure Boot</b> a ulož. Pak vyber <b>Arch Linux install medium</b>.</li>
-          <li>Vpravo uvidíš panel <b>Co napsat</b> — klikni na příkaz a zmáčkni Enter.</li>
+          <li>Vpravo je panel s příkazy pro aktuální krok. U každého je vysvětlené, co jeho části znamenají a proč vypadá právě takhle. Kliknutím ho vložíš do terminálu.</li>
           <li>Kdykoli napiš <kbd>help</kbd>. <kbd>hint</kbd> krok vysvětlí ještě jednou.</li>
         </ul>
-        <label class="beginner-opt">
-          <input id="opt-beginner" type="checkbox" checked>
-          Režim pro začátečníky (ukazuje příkazy)
-        </label>
         <div class="row">
           <button id="btn-power" class="btn primary" type="button">Zapnout notebook</button>
           <button id="btn-continue" class="btn" type="button" hidden>Pokračovat v instalaci</button>
@@ -55,26 +51,14 @@
 
   <section id="screen-install" class="screen hidden">
     <header class="top">
-      <div class="brand">INSTALUJ <span>ARCH</span></div>
+      <div class="brand">Linux installation <span>simulation</span></div>
       <div id="step-label" class="step-label">krok 1</div>
       <div class="top-right">
-        <button id="btn-steps" class="icon-btn" type="button" aria-pressed="true">skrýt kroky</button>
-        <span id="purity" title="V expert módu každá nápověda ubere 8 bodů">čistota 100</span>
-        <button id="btn-beginner" class="icon-btn" type="button" title="Přepne zobrazení příkazů">režim začátečník</button>
-        <button id="btn-sound" class="icon-btn" type="button" title="Zvuk">zvuk vyp</button>
         <a class="wiki" href="https://wiki.archlinux.org/title/Installation_guide" target="_blank" rel="noreferrer">ArchWiki</a>
       </div>
     </header>
     <div class="layout">
-      <aside class="col steps-col">
-        <h2>Postup</h2>
-        <ol id="steps"></ol>
-      </aside>
       <main class="col term-col">
-        <div class="term-bar">
-          <span id="term-title">root@archiso — zsh</span>
-          <span id="env-pill">live</span>
-        </div>
         <div id="terminal" class="terminal" tabindex="0">
           <div id="output"></div>
           <form id="form" autocomplete="off">
@@ -82,22 +66,21 @@
             <input id="cmd" name="cmd" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Příkaz">
           </form>
         </div>
-        <p class="keys">Enter odešle · Tab doplní · ↑↓ historie · klik na příkaz vpravo ho vloží · <kbd>help</kbd> nápověda</p>
       </main>
       <aside class="col brief-col">
         <article class="card">
           <h2 id="brief-title">Teď</h2>
           <p id="brief-how" class="how"></p>
           <p id="brief-text"></p>
-          <p id="brief-why" class="why"></p>
-          <pre id="brief-guide"></pre>
           <div id="brief-cmdbox" class="cmdbox">
-            <h3>Co napsat</h3>
-            <p class="cmd-tip">Klikni na řádek — vloží se do terminálu. Pak Enter.</p>
+            <h3>Příkazy a co znamenají</h3>
+            <p class="cmd-tip">Klikni na příkaz, vloží se do terminálu. Pak Enter.</p>
             <ol id="brief-cmds"></ol>
           </div>
-          <a id="brief-link" href="https://wiki.archlinux.org/title/Installation_guide" target="_blank" rel="noreferrer">otevřít wiki</a>
-          <button id="btn-hint" class="btn tiny" type="button">Vysvětlit podrobněji</button>
+          <h3 class="guide-h">Souvislosti</h3>
+          <pre id="brief-guide"></pre>
+          <a id="brief-link" href="https://wiki.archlinux.org/title/Installation_guide" target="_blank" rel="noreferrer">otevřít wiki k tomuto kroku</a>
+          <button id="btn-hint" class="btn tiny" type="button">Nápověda do terminálu</button>
         </article>
         <article class="card sticker">
           <h2>Nálepky na stole</h2>

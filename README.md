@@ -1,5 +1,5 @@
 # 100% MADE BY AI
-# INSTALUJ ARCH
+# Linux installation simulation
 
 Prohlížečová hra: nainstaluj Arch Linux do notebooku a na konci spusť window manager.
 
@@ -21,7 +21,7 @@ Pak jdi na [http://localhost:8080](http://localhost:8080).
 2. V terminálu live ISO (`root@archiso`, zsh) piš opravdové příkazy: `loadkeys`, `iwctl`, `fdisk`, `mkfs`, `mount`, `pacstrap -K`, `genfstab`, `arch-chroot -S`, `bootctl` nebo GRUB.
 3. Po restartu flashku vytáhni, založ uživatele a nainstaluj jeden window manager.
 
-Na výběr jsou i3, Sway, Hyprland, awesome, Openbox, bspwm a dwm. Příkaz `hint` ukáže postup z wiki a ubere skóre čistoty. Heslo k Wi-Fi `arch-home` je na nálepce routeru.
+Na výběr jsou i3, Sway, Hyprland, awesome, Openbox, bspwm a dwm. Příkaz `hint` ukáže postup z wiki. Panel vpravo u každého příkazu vysvětluje, co jeho části znamenají. Heslo k Wi-Fi `arch-home` je na nálepce routeru.
 
 Rozdělaná instalace se ukládá do `localStorage`.
 

@@ -72,7 +72,7 @@
     ["mkfs.ext4 /dev/...", "naformátuje root oddíl"],
     ["mount /dev/... /mnt", "připojí oddíl do složky"],
     ["pacstrap -K /mnt ...", "nainstaluje základ systému"],
-    ["arch-chroot -S /mnt", "vstoupí do nainstalovaného systému"],
+    ["arch-chroot /mnt", "vstoupí do nainstalovaného systému"],
     ["pacman -S balíček", "instaluje balíčky v novém systému"],
     ["systemctl enable služba", "zapne službu po restartu"],
     ["reboot", "restartuje počítač"],
@@ -164,7 +164,6 @@
       hints: 0,
       cmds: 0,
       t0: Date.now(),
-      sound: false,
       history: [],
       hpos: 0,
       mode: "shell",
@@ -182,7 +181,6 @@
   let S = fresh();
   let busy = false;
   let editor = null;
-  let beginner = localStorage.getItem("arch-beginner") !== "0";
 
   const screens = ["intro", "firmware", "menu", "install", "eject", "win"];
   function show(name) {
@@ -193,20 +191,6 @@
 
   function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
-  }
-
-  function beep(freq, dur) {
-    if (!S.sound) return;
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.frequency.value = freq;
-    o.type = "square";
-    g.gain.value = 0.04;
-    o.connect(g);
-    g.connect(ctx.destination);
-    o.start();
-    o.stop(ctx.currentTime + dur);
   }
 
   function out(text, cls) {
@@ -397,24 +381,20 @@
     const devOk = opt.includes("root=/dev/nvme0n1p" + root.num);
     if (!uuidOk && !devOk) return false;
     if (!/\brw\b/.test(opt)) return false;
-    if (has("intel-ucode")) {
-      const a = initrds.indexOf("/intel-ucode.img");
-      const b = initrds.indexOf(kp.initrd);
-      if (a < 0 || a > b) return false;
-    }
+    const a = initrds.indexOf("/intel-ucode.img");
+    if (a >= 0 && a > initrds.indexOf(kp.initrd)) return false;
     return true;
   }
 
   function loaderReady() {
-    if (!S.sawS) return false;
-    if (S.bootctlEfi && S.kernelOnEsp && entryFiles().some((f) => entryOk(S.files[f]))) return true;
+    if (S.bootctlFiles && S.kernelOnEsp && entryFiles().some((f) => entryOk(S.files[f]))) return true;
     if (S.grubEfi && S.grubCfg && S.kernel) return true;
     return false;
   }
 
   function microReady() {
     if (!has("intel-ucode")) return false;
-    if (S.bootctlEfi) return entryFiles().some((f) => entryOk(S.files[f]));
+    if (S.bootctlFiles) return entryFiles().some((f) => entryOk(S.files[f]));
     if (S.grubEfi) return S.ucodeFresh;
     return false;
   }
@@ -524,7 +504,32 @@
       wiki: "https://wiki.archlinux.org/title/Installation_guide#Partition_the_disks",
       goal: "Založ GPT: EFI System, volitelně swap, a Linux root (x86-64) na zbytek disku.",
       how: "Spusť fdisk. Prázdný disk je DOS, takže první vnitřní příkaz je g (GPT). Pak třikrát n: první oddíl +1G (EFI), druhý +4G (swap), třetí zbytek (root — velikost nech prázdnou, jen Enter). Typy měň přes t: 1 = EFI System, 19 = Linux swap, 23 = Linux root x86-64. Nakonec w.",
-      try: ["fdisk /dev/nvme0n1", "g", "n", "+1G", "t", "1", "n", "+4G", "t", "19", "n", "t", "23", "w"],
+      try: ["fdisk /dev/nvme0n1", "g", "n", "(Enter)", "(Enter)", "+1G", "t", "1", "n", "(Enter)", "(Enter)", "+4G", "t", "2", "19", "n", "(Enter)", "(Enter)", "(Enter)", "t", "3", "23", "w"],
+      notes: [
+        null,
+        "g založí novou prázdnou tabulku GPT. Prázdný disk fdisk otevře jako DOS (MBR), UEFI instalace ale chce GPT.",
+        "n = new, nový oddíl. Teď vzniká první: EFI oddíl.",
+        "Číslo oddílu. Enter vezme navržené 1.",
+        "První sektor. Enter vezme první volné místo na začátku disku.",
+        "Poslední sektor zadaný velikostí: + znamená „od začátku o“, 1G = 1 GiB. Tolik doporučuje příručka pro EFI oddíl.",
+        "t = type, změna typu oddílu. Je jen jeden oddíl, takže se fdisk na číslo neptá.",
+        "Typ 1 = EFI System. Podle tohoto typu firmware pozná, kde hledat zavaděč.",
+        "Druhý nový oddíl: swap.",
+        "Číslo oddílu, Enter vezme 2.",
+        "Začátek hned za EFI oddílem.",
+        "+4G = 4 GiB. Swap je odkládací prostor, když dojde RAM, a slouží i k uspání na disk.",
+        "Změna typu druhého oddílu.",
+        "Oddílů je víc, fdisk se ptá který. 2 = swap.",
+        "Typ 19 = Linux swap.",
+        "Třetí oddíl: root (/), na něm bude celý systém.",
+        "Číslo oddílu, Enter vezme 3.",
+        "Začátek hned za swapem.",
+        "Poslední sektor nech prázdný, oddíl zabere celý zbytek disku.",
+        "Změna typu třetího oddílu.",
+        "3 = root oddíl.",
+        "Typ 23 = Linux root (x86-64). systemd podle něj umí kořenový oddíl najít i sám.",
+        "w = write. Teprve teď se tabulka zapíše na disk a fdisk skončí. Do té doby šlo všechno vrátit (q odejde bez zápisu).",
+      ],
       why: "UEFI chce EFI System Partition. Wiki příklad má 1 GiB ESP, aspoň 4 GiB swap a zbytek pro /.",
       hint: "fdisk /dev/nvme0n1\ng\nn, Enter, Enter, +1G\nt, pak 1 (EFI System)\nn, Enter, Enter, +4G\nt, číslo oddílu, 19 (Linux swap)\nn, Enter, Enter, Enter\nt, číslo oddílu, 23 (Linux root x86-64)\nw\nPrázdný disk fdisk otevře jako DOS. Bez g bys psal MBR.",
       done: () => S.label === "gpt" && layoutReport().errors.length === 0,
@@ -570,7 +575,7 @@
       done: () => {
         const mounted = S.mounts["/mnt"] === rootPart()?.num;
         const swapOk = !swapPart() || S.swaps.includes(swapPart().num);
-        return S.espAt === "/boot" && swapOk && (mounted || S.booted);
+        return S.espAt === "/boot" && swapOk && (mounted || S.booted || has("base"));
       },
     },
     {
@@ -599,12 +604,12 @@
       id: "chroot",
       title: "arch-chroot",
       wiki: "https://wiki.archlinux.org/title/Installation_guide#Chroot",
-      goal: "Vstup do nového systému přes arch-chroot -S.",
-      how: "Přepneš se „dovnitř“ nainstalovaného systému. Přepínač -S je nutný, bez něj později selže bootctl.",
-      try: ["arch-chroot -S /mnt"],
-      why: "Bez -S jede chroot v pid namespace a bootctl nezapíše UEFI proměnné. hostnamectl, localectl a timedatectl v chrootu nemají dbus.",
-      hint: "arch-chroot -S /mnt",
-      done: () => S.sawS,
+      goal: "Vstup do nového systému přes arch-chroot.",
+      how: "Přepneš se „dovnitř“ nainstalovaného systému. Další příkazy už běží v něm.",
+      try: ["arch-chroot /mnt"],
+      why: "S přepínačem -S běží v chrootu systemd a bootctl zapíše položku i do NVRAM. Bez něj systemd-boot nabootuje přes záložní EFI/BOOT/BOOTX64.EFI. hostnamectl, localectl a timedatectl v chrootu nemají dbus.",
+      hint: "arch-chroot /mnt",
+      done: () => S.chrooted,
     },
     {
       id: "tz",
@@ -668,7 +673,7 @@
       goal: "Nainstaluj intel-ucode a dej ho do zavaděče před hlavní initrd.",
       how: "Když jsi intel-ucode dal už do pacstrap a do arch.conf, tenhle krok se splní sám. Jinak ho doinstaluj a v nano uprav arch.conf — řádek initrd /intel-ucode.img musí být nad initramfs.",
       try: () => microTry(),
-      why: "cpuinfo říká GenuineIntel. amd-ucode je pro AMD. U systemd-boot musí být initrd mikrokódu první. GRUB ho vezme, když grub-mkconfig běží až po instalaci balíčku.",
+      why: "cpuinfo říká GenuineIntel. amd-ucode je pro AMD. mkinitcpio má hook microcode, který mikrokód přibalí do initramfs, takže samostatný řádek initrd /intel-ucode.img je volitelný. Když ho tam dáš, musí být první.",
       hint: "pacman -S intel-ucode\nV arch.conf:\ninitrd  /intel-ucode.img\ninitrd  /initramfs-linux.img\nU GRUB znovu grub-mkconfig -o /boot/grub/grub.cfg",
       done: () => microReady(),
     },
@@ -738,22 +743,282 @@
     return ["pacman -S intel-ucode", "nano /boot/loader/entries/arch.conf"];
   }
 
+  const PKGS = {
+    base: "základ systému: systemd, bash, coreutils, pacman a další nutné nástroje",
+    linux: "jádro Linuxu. Nainstaluje /boot/vmlinuz-linux a initramfs",
+    "linux-firmware": "firmware pro hardware, tady hlavně pro Wi-Fi kartu Intel AX201",
+    "intel-ucode": "mikrokód procesoru Intel, opravy chyb CPU nahrané při bootu",
+    networkmanager: "správce sítě, aby po restartu šla Wi-Fi",
+    iwd: "Wi-Fi démon, stejný jako v live ISO",
+    nano: "jednoduchý textový editor. base žádný editor nemá",
+    sudo: "dovolí běžnému uživateli spouštět příkazy jako root",
+    grub: "zavaděč GRUB, alternativa k systemd-boot",
+    efibootmgr: "zapisuje položky bootu do UEFI firmwaru, GRUB ho potřebuje",
+    "xorg-server": "X server, grafický systém, na kterém běží i3",
+    "xorg-xinit": "obsahuje startx, spouští X z terminálu",
+    "i3-wm": "samotný window manager i3",
+    xterm: "terminál. i3 ho po Super+Enter otevře, bez terminálu bys v grafice nic nespustil",
+    dmenu: "spouštěč aplikací, i3 ho otevírá zkratkou Super+D",
+  };
+
+  const FILES = {
+    "/etc/fstab": ["seznam oddílů, které se připojí při bootu", "fstab říká systému při bootu, co kam připojit. Bez něj by root zůstal jen pro čtení a /boot a swap by chyběly."],
+    "/mnt/etc/fstab": ["fstab nového systému. Z live ISO je pořád pod /mnt", "fstab říká systému při bootu, co kam připojit. Bez něj by root zůstal jen pro čtení a /boot a swap by chyběly."],
+    "/etc/localtime": ["soubor, podle kterého systém určuje místní čas", ""],
+    "/etc/locale.gen": ["seznam všech jazyků. Všechny jsou zakomentované (#)", "Smaž # na začátku řádku cs_CZ.UTF-8 UTF-8. Ctrl+O uloží, Ctrl+X zavře. locale-gen pak vygeneruje jen odkomentované řádky."],
+    "/etc/locale.conf": ["nastavení jazyka celého systému", "LANG určuje jazyk hlášek, formát data a čísel a řazení. Platí jen pro jazyk, který locale-gen vygeneroval."],
+    "/etc/vconsole.conf": ["nastavení textové konzole (tty)", "loadkeys platil jen v live ISO. KEYMAP tady zajistí českou klávesnici i po restartu. Musí to být stejná mapa jako u loadkeys."],
+    "/etc/hostname": ["jméno počítače", "Jméno uvidíš v promptu a ostatní ho vidí v síti. Smí obsahovat malá písmena, čísla a pomlčku."],
+    "/boot/loader/loader.conf": ["hlavní nastavení systemd-boot", "default říká, kterou položku menu spustit, timeout kolik sekund menu ukazovat."],
+    "/boot/loader/entries/arch.conf": ["jedna položka v menu systemd-boot", "linux a initrd jsou cesty od kořene EFI oddílu. Ten je připojený na /boot, proto se /boot nepíše. options root=UUID=… říká jádru, kde je kořenový oddíl, a rw ho připojí pro zápis."],
+    "/boot/grub/grub.cfg": ["konfigurace menu GRUBu", ""],
+    "~/.xinitrc": ["skript, který startx spustí po startu X serveru", "exec i3 nahradí skript window managerem. Když i3 ukončíš, skončí i X a vrátíš se do terminálu."],
+  };
+
+  // Lines inside quotes, explained by their first word.
+  const QUOTED = [
+    [/^%s\\n$/, "formát: %s = vlož další argument, \\n = konec řádku. printf ho zopakuje pro každý další argument, každý tak bude na vlastním řádku"],
+    [/^title\b/, "název položky v menu zavaděče"],
+    [/^linux\b/, "cesta k jádru, počítaná od kořene EFI oddílu"],
+    [/^initrd\s+\/intel-ucode/, "mikrokód procesoru. Když je uvedený, musí být první initrd"],
+    [/^initrd\b/, "initramfs, malý systém v RAM s ovladači, který najde a připojí root"],
+    [/^options\b/, "parametry jádra: root=UUID=… je kořenový oddíl, rw ho připojí pro zápis"],
+    [/^default\b/, "položka, která se spustí, když nic nevybereš"],
+    [/^timeout\b/, "kolik sekund menu čeká"],
+    [/^LANG=/, "LANG = jazyk systému. cs_CZ je čeština pro Česko, UTF-8 kódování znaků. \\n na konci odřádkuje"],
+    [/^KEYMAP=/, "KEYMAP = rozložení klávesnice v konzoli. \\n na konci odřádkuje"],
+    [/^exec\b/, "exec nahradí shell spuštěným programem, tady window managerem"],
+  ];
+
+  const CMDS = {
+    loadkeys: {
+      what: "načte rozložení klávesnice do konzole. Platí do restartu",
+      args: { "cz-qwertz": "česká mapa s rozložením QWERTZ: Z je vedle T, Y vlevo dole, jako na nálepce notebooku" },
+      why: "Live ISO začíná s americkou klávesnicí (us). Bez přepnutí by Z a Y byly prohozené a speciální znaky jinde, než je vidíš na klávesách.",
+    },
+    cat: {
+      what: "vypíše obsah souboru",
+      args: { "/sys/firmware/efi/fw_platform_size": "soubor, který jádro vytvoří jen při startu přes UEFI. Obsahuje bitovost firmwaru (64 nebo 32)" },
+      why: (t) => t.includes("/sys/firmware/efi/fw_platform_size")
+        ? "Podle režimu bootu se volí celý postup: UEFI znamená GPT, EFI oddíl a systemd-boot. Kdyby soubor neexistoval, stroj běží v BIOS/CSM režimu."
+        : "Kontrola po genfstab: root (/), /boot a swap tam mají být každý právě jednou, s UUID.",
+    },
+    iwctl: {
+      what: "interaktivní klient iwd, démona pro Wi-Fi, který v live ISO už běží",
+      why: "Výběr sítě a heslo se zadávají uvnitř iwctl. Prompt se změní na [iwd]# a další příkazy (station …) se píšou tam.",
+    },
+    "station scan": {
+      what: "práce s Wi-Fi kartou v režimu klienta",
+      args: { wlan0: "jméno Wi-Fi zařízení (vypíše ho device list)", scan: "spustí hledání okolních sítí" },
+      why: "scan jen spustí hledání a nic nevypíše. Výsledky ukáže až get-networks.",
+    },
+    "station get-networks": {
+      what: "práce s Wi-Fi kartou v režimu klienta",
+      args: { wlan0: "jméno Wi-Fi zařízení", "get-networks": "vypíše nalezené sítě a jejich zabezpečení" },
+      why: "Ověříš, že tvoje síť je v dosahu a jak se přesně jmenuje.",
+    },
+    "station connect": {
+      what: "práce s Wi-Fi kartou v režimu klienta",
+      args: { wlan0: "jméno Wi-Fi zařízení", connect: "připojí se k síti", "arch-home": "SSID, jméno sítě z nálepky na routeru" },
+      why: "Síť je chráněná heslem (psk), takže se iwctl zeptá Passphrase:. Napiš wiki4life.",
+    },
+    exit: {
+      what: "ukončí aktuální shell",
+      why: (t, step) => step.id === "net"
+        ? "Ukončí iwctl a vrátí tě do zsh v live ISO."
+        : step.id === "reboot"
+          ? "Opustí chroot. Prompt se vrátí na root@archiso, jsi zase v live ISO."
+          : "Odhlásí aktuálního uživatele a vrátí tě na přihlašovací výzvu.",
+    },
+    ping: {
+      what: "posílá testovací pakety a čeká na odpověď",
+      args: { "-c": "count, počet paketů", "3": "pošle tři a skončí", "ping.archlinux.org": "server Archu určený právě na test spojení" },
+      why: "Úspěšný ping ověří naráz Wi-Fi, IP adresu, DNS (jméno se přeložilo na adresu) i cestu do internetu. Bez -c by běžel, dokud ho nezastavíš Ctrl+C.",
+    },
+    timedatectl: {
+      what: "ukáže čas, časovou zónu a stav synchronizace",
+      why: "pacman ověřuje podpisy balíčků a HTTPS certifikáty platí jen v určitém období. Se špatným časem selže obojí. Hledej System clock synchronized: yes.",
+    },
+    lsblk: {
+      what: "vypíše disky a oddíly jako strom",
+      why: "Musíš vědět, na který disk instaluješ. nvme0n1 je disk notebooku, sda flashka, loop0 obraz live systému.",
+    },
+    fdisk: {
+      what: "editor tabulky oddílů",
+      args: { "-l": "list, vypíše tabulky oddílů všech disků a nic nemění" },
+      why: (t) => t.includes("-l")
+        ? "Ukáže velikost a model disků a jestli už nějaké oddíly mají."
+        : "Otevře interaktivní editor. Změny drží jen v paměti, na disk je zapíše až příkaz w.",
+    },
+    "mkfs.fat": {
+      what: "vytvoří souborový systém FAT",
+      args: { "-F": "velikost FAT tabulky", "32": "FAT32" },
+      why: "UEFI firmware umí číst jen FAT, proto musí být EFI oddíl FAT32. Firmware z něj spouští zavaděč.",
+    },
+    mkswap: {
+      what: "zapíše na oddíl hlavičku swapu",
+      why: "Swap není souborový systém, proto ne mkfs. Hlavička mu dá UUID, podle kterého ho pak najde fstab.",
+    },
+    "mkfs.ext4": {
+      what: "vytvoří souborový systém ext4",
+      why: "ext4 je výchozí volba instalační příručky: stabilní a podporovaná všemi nástroji. Na tenhle oddíl přijde celý systém (/).",
+    },
+    mount: {
+      what: "připojí souborový systém oddílu do složky",
+      args: { "--mkdir": "cílovou složku nejdřív vytvoří, /mnt/boot zatím neexistuje", "/mnt/boot": "složka, která bude v novém systému /boot" },
+      why: (t) => t.includes("/mnt/boot")
+        ? "systemd-boot čte jádro jen z EFI oddílu a jádro se instaluje do /boot. Proto EFI oddíl na /mnt/boot, a to ještě před pacstrap."
+        : "Všechno zapsané do /mnt skončí na disku. Root jde první, ostatní oddíly se připojují do složek uvnitř něj.",
+    },
+    swapon: {
+      what: "zapne swap na oddílu",
+      why: "genfstab zapisuje jen to, co je právě aktivní. Bez swapon by swap ve fstab chyběl.",
+    },
+    pacstrap: {
+      what: "nainstaluje balíčky do nového systému. Je to pacman s kořenem v /mnt",
+      args: { "-K": "založí v novém systému keyring pacmanu, klíče pro ověřování podpisů balíčků" },
+      why: "Z prázdného ext4 udělá funkční Arch. Kromě nutného základu přidáváme, co by po restartu chybělo: síť, editor a sudo.",
+    },
+    genfstab: {
+      what: "vypíše fstab podle toho, co je teď připojené pod /mnt",
+      args: { "-U": "oddíly označí podle UUID místo /dev/nvme0n1pX" },
+      why: "UUID se nemění. Jména jako /dev/nvme0n1p3 se po přidání dalšího disku změnit můžou a systém by nenabootoval.",
+    },
+    "arch-chroot": {
+      what: "spustí shell, ve kterém je / nový systém v /mnt. Připojí do něj i /proc, /sys a /dev",
+      args: { "-S": "uvnitř spustí i systemd, bootctl pak zapíše položku do UEFI" },
+      why: "Od teď příkazy mění nový systém, ne live ISO. Cesty se píšou bez /mnt: /etc/hostname je už soubor nového systému.",
+    },
+    ln: {
+      what: "vytvoří odkaz na soubor",
+      args: { "-sf": "-s symbolický odkaz, -f přepíše existující soubor", "/usr/share/zoneinfo/Europe/Prague": "databáze časových zón, soubor pro Prahu" },
+      why: "Místo kopie se dělá odkaz, takže se aktualizace časových zón (třeba změna letního času) projeví samy.",
+    },
+    hwclock: {
+      what: "pracuje s hardwarovými hodinami (RTC) na desce",
+      args: { "--systohc": "system to hardware clock, zapíše systémový čas do RTC" },
+      why: "Vytvoří /etc/adjtime s informací, že RTC běží v UTC. Bez toho by čas po bootu mohl ujet o hodinu nebo dvě.",
+    },
+    nano: {
+      what: "jednoduchý textový editor v terminálu",
+      why: (t) => (FILES[t[1]] && FILES[t[1]][1]) || "Uprav soubor, Ctrl+O uloží, Ctrl+X zavře.",
+    },
+    "locale-gen": {
+      what: "vygeneruje jazyky odkomentované v /etc/locale.gen",
+      why: "Bez vygenerování by LANG=cs_CZ.UTF-8 neplatilo a programy by spadly zpět na angličtinu.",
+    },
+    printf: {
+      what: "vypíše text podle formátu. > ho místo na obrazovku zapíše do souboru",
+      why: (t) => { const i = t.indexOf(">"); const f = i >= 0 ? FILES[t[i + 1]] : null; return f && f[1] ? f[1] : "printf na rozdíl od echo přesně dodrží formát a \\n."; },
+    },
+    pacman: {
+      what: "správce balíčků Archu",
+      args: { "-S": "sync, stáhne a nainstaluje balíčky z repozitářů" },
+      why: "Uvnitř nového systému se instaluje pacmanem. pacstrap byl jen na první instalaci zvenku.",
+    },
+    systemctl: {
+      what: "ovládá služby systemd",
+      args: { enable: "zapne službu při každém bootu", NetworkManager: "služba správce sítě" },
+      why: "Nainstalovaný balíček sám od sebe neběží. Bez enable by po restartu nebyla síť.",
+    },
+    passwd: {
+      what: "nastaví heslo. Bez jména rootovi",
+      why: "Bez hesla se po restartu nepřihlásíš. Heslo se píše naslepo a zadává se dvakrát.",
+    },
+    blkid: {
+      what: "vypíše UUID a typ souborového systému oddílů",
+      why: "UUID rootu potřebuješ do položky zavaděče. Je to dlouhé UUID ext4 na rootu, ne krátké UUID EFI oddílu.",
+    },
+    bootctl: {
+      what: "nástroj zavaděče systemd-boot",
+      args: { install: "zkopíruje systemd-boot na EFI oddíl a zaregistruje ho ve firmwaru" },
+      why: "systemd-boot je součást systemd, takže už je v base. Firmware spustí jeho EFI soubor z EFI oddílu a ten ukáže menu z /boot/loader.",
+    },
+    "grub-mkconfig": {
+      what: "vygeneruje konfiguraci GRUBu",
+      args: { "-o": "výstupní soubor" },
+      why: "Najde nainstalovaná jádra a mikrokód a zapíše je do menu GRUBu.",
+    },
+    reboot: {
+      what: "restartuje počítač",
+      why: "Nový systém se teprve teď poprvé spustí z disku. Flashku pak vytáhni, jinak firmware nabootuje znovu ISO.",
+    },
+    nmcli: {
+      what: "příkazový klient NetworkManageru",
+      args: { device: "práce se síťovými zařízeními", wifi: "Wi-Fi", connect: "připojit k síti", "arch-home": "SSID sítě", password: "následuje heslo", wiki4life: "heslo z nálepky routeru" },
+      why: "Heslo z iwd v live ISO se do instalace nepřeneslo. NetworkManager si síť uloží a příště se připojí sám.",
+    },
+    useradd: {
+      what: "založí uživatelský účet",
+      args: { "-m": "vytvoří domovskou složku /home/jméno", "-G": "doplňkové skupiny", wheel: "skupina správců, smí používat sudo", "-s": "přihlašovací shell", "/bin/bash": "shell bash" },
+      why: "Grafiku nespouštíš jako root a běžně pod rootem nepracuješ. Jeden překlep jako root může smazat celý systém.",
+    },
+    visudo: {
+      what: "bezpečně otevře /etc/sudoers",
+      why: "Před uložením zkontroluje syntaxi, takže si chybou sudo nezamkneš. Odkomentuj %wheel ALL=(ALL:ALL) ALL, členové wheel pak smí přes sudo cokoli.",
+    },
+    startx: {
+      what: "spustí X server a v něm ~/.xinitrc",
+      why: "Bez přihlašovací obrazovky (display manageru) se grafika spouští ručně z terminálu.",
+    },
+  };
+
+  function splitShown(line) {
+    return line.match(/'[^']*'|"[^"]*"|\S+/g) || [];
+  }
+
+  function explainToken(tok, prev, info) {
+    if (info.args && info.args[tok]) return info.args[tok];
+    if (tok === ">") return "přesměrování: výstup zapíše do souboru, existující obsah přepíše";
+    if (tok === ">>") return "přesměrování: výstup připíše na konec souboru";
+    if (FILES[tok]) return FILES[tok][0];
+    if (PKGS[tok]) return PKGS[tok];
+    const m = tok.match(/^\/dev\/nvme0n1p(\d+)$/);
+    if (m) {
+      const n = Number(m[1]);
+      const role = efiPart()?.num === n ? "EFI oddíl" : swapPart()?.num === n ? "swap" : rootPart()?.num === n ? "root oddíl (/)" : "oddíl";
+      return role + " — " + n + ". oddíl (p" + n + ") disku nvme0n1";
+    }
+    if (tok === "/dev/nvme0n1") return "celý disk notebooku: nvme0 = první NVMe řadič, n1 = první disk na něm";
+    if (tok === "/mnt") return "složka v live systému, kam je připojený root nového systému";
+    if (/^['"]/.test(tok)) {
+      const inner = tok.slice(1, -1);
+      for (const [re, text] of QUOTED) if (re.test(inner)) return text;
+      if (prev === ">" || prev === ">>") return null;
+      return "text k zapsání. \\n na konci je konec řádku, printf ho sám nepřidá";
+    }
+    if (prev === "useradd" || (prev && info === CMDS.useradd && /^[a-z_][a-z0-9_-]*$/.test(tok) && tok !== "wheel")) return "jméno nového uživatele";
+    if (info === CMDS.passwd) return "uživatel, kterému heslo nastavuješ";
+    return null;
+  }
+
+  function explainLine(line, step, index) {
+    const note = step.notes && step.notes[index];
+    if (note) return { parts: [], why: note };
+    if (line.startsWith("(")) return { parts: [], why: "" };
+    let toks = splitShown(line);
+    const parts = [];
+    if (toks[0] === "sudo") {
+      parts.push(["sudo", "spustí zbytek příkazu jako root. Zeptá se na heslo uživatele"]);
+      toks = toks.slice(1);
+    }
+    const key = toks[0] === "station" ? "station " + toks[2] : toks[0];
+    const info = CMDS[key];
+    if (!info) return { parts, why: "" };
+    if (toks[0] === "station") parts.push(["station", info.what]);
+    else parts.push([toks[0], info.what]);
+    for (let i = 1; i < toks.length; i++) {
+      const text = explainToken(toks[i], toks[i - 1], info);
+      if (text) parts.push([toks[i], text]);
+    }
+    const why = typeof info.why === "function" ? info.why(toks, step) : info.why;
+    return { parts, why };
+  }
+
   function stepTry(step) {
     const t = step.try;
     if (typeof t === "function") return t().filter(Boolean);
     return Array.isArray(t) ? t : [];
-  }
-
-  function setBeginner(on) {
-    beginner = on;
-    localStorage.setItem("arch-beginner", on ? "1" : "0");
-    const btn = $("btn-beginner");
-    if (btn) btn.textContent = on ? "režim začátečník" : "režim expert";
-    const opt = $("opt-beginner");
-    if (opt) opt.checked = on;
-    const hint = $("btn-hint");
-    if (hint) hint.textContent = on ? "Vysvětlit podrobněji" : "Nápověda (−8 čistoty)";
-    if ($("steps")) render();
   }
 
   function renderGuide(cur) {
@@ -762,22 +1027,46 @@
     const ol = $("brief-cmds");
     if (how) how.textContent = cur.how || "";
     if (!box || !ol) return;
-    box.classList.toggle("hidden", !beginner);
     ol.innerHTML = "";
-    for (const line of stepTry(cur)) {
+    for (const [i, line] of stepTry(cur).entries()) {
       const li = document.createElement("li");
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "cmd-chip";
-      btn.textContent = line;
-      btn.title = "Kliknutím vložíš do terminálu";
-      btn.addEventListener("click", () => {
-        const fill = line.startsWith("(") ? "" : line;
-        if (!fill) return;
-        $("cmd").value = fill;
-        $("cmd").focus();
-      });
-      li.appendChild(btn);
+      li.className = "cmd-item";
+      if (line.startsWith("(")) {
+        const plain = document.createElement("span");
+        plain.className = "cmd-plain";
+        plain.textContent = line;
+        li.appendChild(plain);
+      } else {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "cmd-chip";
+        btn.textContent = line;
+        btn.title = "Kliknutím vložíš do terminálu";
+        btn.addEventListener("click", () => {
+          $("cmd").value = line;
+          $("cmd").focus();
+        });
+        li.appendChild(btn);
+      }
+      const ex = explainLine(line, cur, i);
+      if (ex.parts.length) {
+        const dl = document.createElement("dl");
+        dl.className = "cmd-parts";
+        for (const [tok, text] of ex.parts) {
+          const dt = document.createElement("dt");
+          dt.textContent = tok;
+          const dd = document.createElement("dd");
+          dd.textContent = text;
+          dl.append(dt, dd);
+        }
+        li.appendChild(dl);
+      }
+      if (ex.why) {
+        const why = document.createElement("p");
+        why.className = "cmd-why";
+        why.textContent = ex.why;
+        li.appendChild(why);
+      }
       ol.appendChild(li);
     }
   }
@@ -897,8 +1186,8 @@
       if (rootUuid) say("UUID rootu " + rootDev + " je " + rootUuid + ". Ve fstab musí být u přípojného bodu /.");
     } else if (step.id === "chroot") {
       say("arch-chroot tě přepne do nového systému, jako bys z něj už bootoval. Prompt se změní na bash.");
-      say("arch-chroot -S /mnt");
-      say("-S v chrootu nastartuje systemd. Bez něj bootctl a grub-install zapíšou soubory, ale UEFI proměnnou s položkou bootu ne. Wiki to u systemd-boot říká výslovně.");
+      say("arch-chroot /mnt");
+      say("S přepínačem -S v chrootu běží i systemd a bootctl pak zapíše položku i do UEFI. Bez něj systemd-boot nabootuje přes záložní EFI/BOOT/BOOTX64.EFI, funguje obojí.");
       say("V chrootu nefunguje timedatectl, hostnamectl ani localectl. Nemají dbus. Hostname se píše do souboru, časová zóna přes ln.");
     } else if (step.id === "tz") {
       say("Notebook je v Praze. Zóna je cesta do zoneinfo, ne jen město.");
@@ -925,7 +1214,7 @@
       say("passwd");
       say("Prázdné heslo se nevezme. Když se zápisy neshodují, heslo zůstane staré.");
     } else if (step.id === "loader") {
-      say("ESP musí být na /boot a chroot musí být z arch-chroot -S. bootctl install zkopíruje EFI binárku a založí položku Linux Boot Manager.");
+      say("ESP musí být na /boot. bootctl install zkopíruje EFI binárku na ESP (i záložní EFI/BOOT/BOOTX64.EFI). Položku Linux Boot Manager v NVRAM založí jen v arch-chroot -S.");
       say("bootctl install");
       say("Pak dva soubory. Cesty u linux a initrd jsou od kořene ESP, ne /boot/vmlinuz-linux.");
       if (rootUuid) {
@@ -941,7 +1230,7 @@
       say("cpuinfo říká GenuineIntel, model i5-1240P. Balíček je intel-ucode. amd-ucode je pro AMD a tady nepatří.");
       if (!has("intel-ucode")) say("pacman -S intel-ucode\n\nSoubor přistane v /boot/intel-ucode.img.");
       else say("intel-ucode už v systému je, obraz je /boot/intel-ucode.img.");
-      say("U systemd-boot musí být v arch.conf tahle dvojice a mikrokód první:\ninitrd  /intel-ucode.img\ninitrd  /initramfs-linux.img");
+      say("mkinitcpio má hook microcode, který mikrokód přibalí rovnou do initramfs. Řádek initrd /intel-ucode.img v arch.conf je proto volitelný. Když ho tam máš, musí být nad initramfs:\ninitrd  /intel-ucode.img\ninitrd  /initramfs-linux.img");
       if (rootUuid) say("Celé options nech root=UUID=" + rootUuid + " rw.");
       say("Když používáš GRUB a balíček doinstaluješ až po grub-mkconfig, spusť grub-mkconfig -o /boot/grub/grub.cfg znovu. Jinak ho do konfigurace nedá.");
     } else if (step.id === "reboot") {
@@ -985,26 +1274,12 @@
     const cur = currentStep();
     const doneN = STEPS.filter((s) => s.done()).length;
     $("step-label").textContent = doneN + "/" + STEPS.length + " · " + cur.title;
-    $("purity").textContent = "čistota " + Math.max(0, 100 - S.hints * 8);
-    $("steps").innerHTML = "";
-    for (const [i, step] of STEPS.entries()) {
-      const li = document.createElement("li");
-      const on = step.id === cur.id;
-      li.className = step.done() ? "done" : on ? "on" : "";
-      li.innerHTML = `<span class="n">${i + 1}</span>${step.done() ? "✓ " : ""}${step.title}`;
-      $("steps").appendChild(li);
-    }
     $("brief-title").textContent = cur.title;
     $("brief-text").textContent = cur.goal;
     $("brief-guide").textContent = guideText(cur);
     $("brief-link").href = cur.wiki;
     renderGuide(cur);
     renderCommandReference();
-    const host = S.booted ? hostnameNow() || "archlinux" : "archiso";
-    let shell = "zsh";
-    if (S.env !== "live") shell = "bash";
-    $("term-title").textContent = `${S.user}@${host} — ${shell}`;
-    $("env-pill").textContent = S.env === "chroot" ? "chroot" : S.booted ? "system" : "live";
     $("prompt").textContent = promptText();
     const secret = ["pass", "pass2", "loginpass", "supass", "iwpass"].includes(S.mode);
     $("cmd").type = secret ? "password" : "text";
@@ -1145,10 +1420,9 @@
     const p = [];
     if (!has("base") || !S.kernel) p.push("Chybí base a jádro (pacstrap).");
     if (!S.rootPass) p.push("Není nastavené heslo roota.");
-    if (!S.sawS) p.push("arch-chroot neběžel s -S, takže UEFI položka nevznikla.");
-    if (!(S.bootctlEfi || S.grubEfi)) p.push("Zavaděč nezapsal EFI položku (bootctl install nebo grub-install).");
-    if (S.bootctlEfi && !S.kernelOnEsp) p.push("systemd-boot nemá jádro na ESP. ESP musí být připojený na /boot ve chvíli, kdy se instaluje linux.");
-    if (S.bootctlEfi && !entryFiles().some((f) => entryOk(S.files[f]))) p.push("Žádná položka v /boot/loader/entries/*.conf nemá linux, initrd a root=UUID=… rw.");
+    if (!(S.bootctlFiles || S.grubEfi)) p.push("Na ESP není zavaděč (bootctl install nebo grub-install).");
+    if (S.bootctlFiles && !S.kernelOnEsp) p.push("systemd-boot nemá jádro na ESP. ESP musí být připojený na /boot ve chvíli, kdy se instaluje linux.");
+    if (S.bootctlFiles && !entryFiles().some((f) => entryOk(S.files[f]))) p.push("Žádná položka v /boot/loader/entries/*.conf nemá linux, initrd a root=UUID=… rw.");
     if (S.grubEfi && !S.grubCfg) p.push("Chybí grub-mkconfig -o /boot/grub/grub.cfg.");
     return p;
   }
@@ -1332,6 +1606,7 @@
   async function execOne(line) {
     const { cmd, redir } = splitRedirect(line);
     const argv = tokenize(cmd);
+    while (argv.length > 1 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[0])) argv.shift();
     if (!argv.length) return true;
     if (argv[0] === "sudo") return sudoWrap(argv.slice(1), redir);
     const io = ioPair();
@@ -1443,6 +1718,7 @@
     if (c === "pacman") return pacman(argv, io);
     if (c === "reflector") return reflector(argv, io);
     if (c === "locale-gen") return localeGen(io);
+    if (c === "mkinitcpio") return mkinitcpio(argv, io);
     if (c === "hwclock") return hwclock(argv, io);
     if (c === "passwd") return passwd(argv, io);
     if (c === "useradd") return useradd(argv, io);
@@ -1462,7 +1738,7 @@
     if (c === "sway") return startSway(io);
     if (c === "start-hyprland" || c === "Hyprland") return startHypr(c, io);
     io.err("zsh: command not found: " + c);
-    io.note("Ten příkaz hra nezná. Napiš help, nebo klikni na zelený řádek vpravo (Co napsat).");
+    io.note("Ten příkaz hra nezná. Napiš help, nebo klikni na příkaz vpravo v panelu.");
     return false;
   }
 
@@ -1474,16 +1750,16 @@
     for (const line of stepTry(step)) io.log("  " + line);
     io.log("");
     io.log("help / commands  — tahle nápověda");
-    io.log("hint             — ještě jednou, s extra textem" + (beginner ? "" : " (−8 čistoty)"));
+    io.log("hint             — ještě jednou, s extra textem");
     io.log("man PŘÍKAZ       — krátké vysvětlení příkazu (třeba man loadkeys)");
     io.log("clear            — smaže obrazovku (nebo Ctrl+L)");
-    io.log("Tab doplní příkaz, šipky berou historii. Klik na zelený řádek vpravo ho vloží.");
+    io.log("Tab doplní příkaz, šipky berou historii. Klik na příkaz vpravo ho vloží.");
     return true;
   }
 
   function hintCmd() {
     const step = currentStep();
-    if (!beginner) S.hints += 1;
+    S.hints += 1;
     out("— " + step.title + " —", "note");
     if (step.how) out(step.how, "dim");
     for (const line of step.hint.split("\n")) out(line, "note");
@@ -1507,7 +1783,7 @@
       bootctl: "bootctl install zapíše systemd-boot na ESP (/efi, /boot nebo /boot/efi).",
       pacstrap: "pacstrap -K /mnt balíčky  — -K inicializuje pacman keyring v novém systému.",
       genfstab: "genfstab -U /mnt vypíše fstab s UUID. Přesměruj ho do /mnt/etc/fstab.",
-      "arch-chroot": "arch-chroot -S /mnt spustí v chrootu systemd, aby šly UEFI proměnné.",
+      "arch-chroot": "arch-chroot /mnt vstoupí do nového systému. S -S v něm běží i systemd.",
       loadkeys: "loadkeys cz-qwertz načte rozložení do aktuální konzole. Natrvalo je vconsole.conf.",
       iwctl: "iwctl je klient k iwd. station wlan0 connect SSID se zeptá na heslo z nálepky (wiki4life).",
       fdisk: "fdisk /dev/nvme0n1  — g založí GPT, n oddíl, t typ (1 EFI, 19 swap, 23 root), w zapíše.",
@@ -2199,6 +2475,7 @@
           S.swaps = [];
           S.espAt = null;
           S.kernelOnEsp = false;
+          S.bootctlFiles = false;
           S.bootctlEfi = false;
           S.grubEfi = false;
           S.grubCfg = false;
@@ -2555,7 +2832,7 @@
       return false;
     }
     if (!argv.includes("/mnt")) {
-      io.err("usage: arch-chroot -S /mnt");
+      io.err("usage: arch-chroot [-S] /mnt");
       return false;
     }
     if (S.mounts["/mnt"] !== rootPart()?.num || !has("base")) {
@@ -2565,6 +2842,7 @@
     }
     const systemd = argv.includes("-S");
     S.env = "chroot";
+    S.chrooted = true;
     S.cwd = "/";
     S.user = "root";
     if (systemd) {
@@ -2572,7 +2850,6 @@
       io.log("==> Starting systemd in the chroot (-S)");
     } else {
       io.log("==> Entering chroot");
-      io.note("Bez -S bootctl a efibootmgr nezapíšou UEFI proměnné. Wiki: arch-chroot -S /mnt");
     }
     return true;
   }
@@ -2646,6 +2923,27 @@
     if (!list.length) io.log("  (nic není odkomentované)");
     list.forEach((l) => io.log("  " + l + "... done"));
     io.log("Generation complete.");
+    return true;
+  }
+
+  function mkinitcpio(argv, io) {
+    if (S.env === "live") {
+      io.err("mkinitcpio patří do chrootu.");
+      return false;
+    }
+    if (!S.kernel) {
+      io.err("==> ERROR: No presets found in /etc/mkinitcpio.d");
+      return false;
+    }
+    if (!argv.includes("-P")) {
+      io.err("mkinitcpio: použij -P (všechny presety)");
+      return false;
+    }
+    const kp = kernelPaths();
+    const name = kp.linux.slice("/vmlinuz-".length);
+    io.log("==> Building image from preset: /etc/mkinitcpio.d/" + name + ".preset: 'default'");
+    if (has("intel-ucode")) io.log("  -> Running build hook: [microcode]");
+    io.log("==> Image generation successful");
     return true;
   }
 
@@ -2811,8 +3109,9 @@
     io.log('Copied "/usr/lib/systemd/boot/efi/systemd-bootx64.efi" to "' + S.espAt + '/EFI/BOOT/BOOTX64.EFI".');
     io.log("Random seed file " + S.espAt + "/loader/random-seed successfully written.");
     if (S.env === "chroot" && !S.sawS) {
-      io.err("Not operating on EFI variables, as the system is running inside a chroot without systemd.");
-      io.note("Wiki u systemd-boot: do chrootu vstup přes arch-chroot -S.");
+      io.log("Not operating on EFI variables, as the system is running inside a chroot without systemd.");
+      io.note("Položka v NVRAM nevznikla, firmware ale spustí záložní /EFI/BOOT/BOOTX64.EFI. Bootovat to bude.");
+      if (!S.kernelOnEsp) io.note("EFI aplikace je na ESP, jádro ale na ESP není. U systemd-boot musí pacstrap/pacman -S linux proběhnout s ESP na /boot.");
       return true;
     }
     S.bootctlEfi = true;
@@ -2882,11 +3181,6 @@
     const dir = efi ? efi.slice("--efi-directory=".length) : null;
     if (!dir || dir !== S.espAt) {
       io.err("EFI directory " + (dir || "(chybí)") + " nesedí s připojeným ESP (" + S.espAt + ").");
-      return false;
-    }
-    if (S.env === "chroot" && !S.sawS) {
-      io.err("efibootmgr: Could not prepare Boot variable: No such file or directory");
-      io.note("Chroot bez -S nezapíše UEFI proměnné.");
       return false;
     }
     S.grubEfi = true;
@@ -3195,8 +3489,7 @@
     S.wm = id;
     $("win-title").textContent = id.toUpperCase();
     const sec = Math.max(1, Math.round((Date.now() - S.t0) / 1000));
-    const purity = Math.max(0, 100 - S.hints * 8);
-    $("win-stats").textContent = `Window manager běží. Čistota ${purity}/100 · čas ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")} · příkazů ${S.cmds} · nápověd ${S.hints}.`;
+    $("win-stats").textContent = `Window manager běží. Čas ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")} · příkazů ${S.cmds} · nápověd ${S.hints}.`;
     const ul = $("win-notes");
     ul.innerHTML = "";
     const bits = [
@@ -3448,7 +3741,7 @@
     out("Linux archiso 7.2.2-arch1-1  x86_64", "dim");
     out("root na tty1, shell je zsh, heslo není.", "dim");
     if (copyRam) out("copytoram: ISO je v RAM. Ve firmwaru je USB pořád první, takže při rebootu flashku stejně vytáhni.", "note");
-    out("Jsi root, heslo není. Vpravo je panel Co napsat — klikni na příkaz a zmáčkni Enter.", "note");
+    out("Jsi root, heslo není. Vpravo je panel s příkazy a vysvětlením, co znamenají. Klikni na příkaz a zmáčkni Enter.", "note");
     out("Kdykoli: help   ·   man PŘÍKAZ   ·   hint", "dim");
     out("Příkaz je text před mezerou, jeho volby začínají pomlčkou. Když si nejsi jistý, klikni vpravo na Slovníček příkazů.", "dim");
     render();
@@ -3631,20 +3924,6 @@
     save();
   });
 
-  $("btn-steps").addEventListener("click", () => {
-    const layout = document.querySelector("#screen-install .layout");
-    const hidden = layout.classList.toggle("steps-hidden");
-    $("btn-steps").textContent = hidden ? "kroky" : "skrýt kroky";
-    $("btn-steps").setAttribute("aria-pressed", hidden ? "false" : "true");
-  });
-
-  $("btn-sound").addEventListener("click", () => {
-    S.sound = !S.sound;
-    $("btn-sound").textContent = S.sound ? "zvuk zap" : "zvuk vyp";
-    if (S.sound) beep(520, 0.05);
-    save();
-  });
-
   $("btn-again").addEventListener("click", () => {
     localStorage.removeItem(KEY);
     location.reload();
@@ -3700,7 +3979,7 @@
     }
     if (e.key === "Tab") {
       e.preventDefault();
-      const names = ["help", "commands", "hint", "lsblk", "fdisk", "loadkeys", "ping", "timedatectl", "iwctl", "pacstrap", "genfstab", "arch-chroot", "pacman", "mount", "mkfs.fat", "mkfs.ext4", "mkswap", "swapon", "blkid", "bootctl", "systemctl", "nano", "passwd", "useradd", "visudo", "reboot", "nmcli", "startx", "sway", "start-hyprland", "man"];
+      const names = ["help", "commands", "hint", "lsblk", "fdisk", "loadkeys", "ping", "timedatectl", "iwctl", "pacstrap", "genfstab", "arch-chroot", "mkinitcpio", "pacman", "mount", "mkfs.fat", "mkfs.ext4", "mkswap", "swapon", "blkid", "bootctl", "systemctl", "nano", "passwd", "useradd", "visudo", "reboot", "nmcli", "startx", "sway", "start-hyprland", "man"];
       const extra = stepTry(currentStep());
       const all = [...new Set([...extra, ...names, ...extra.map((l) => l.split(/\s+/)[0])])];
       const cur = $("cmd").value;
@@ -3717,9 +3996,20 @@
 
   document.addEventListener("keydown", bootKeys);
 
-  $("opt-beginner").addEventListener("change", (e) => setBeginner(e.target.checked));
-  $("btn-beginner").addEventListener("click", () => setBeginner(!beginner));
-  setBeginner(beginner);
+  // Typing anywhere on the install screen goes to the terminal prompt.
+  function typingTarget(el) {
+    return el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+  }
+  document.addEventListener("keydown", (e) => {
+    if (document.body.dataset.screen !== "install" || editor) return;
+    if (typingTarget(document.activeElement) || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key.length === 1 || ["Enter", "Backspace", "ArrowUp", "ArrowDown", "Tab"].includes(e.key)) $("cmd").focus();
+  });
+  $("terminal").addEventListener("click", () => {
+    if (String(window.getSelection())) return;
+    $("cmd").focus();
+  });
+
 
   if (localStorage.getItem(KEY)) $("btn-continue").hidden = false;
 })();
